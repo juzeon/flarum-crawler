@@ -10,10 +10,12 @@ derive_builder = "0.20.2"
 htmd = "0.2.2"
 regex = "1.11.1"
 reqwest = { version = "0.12.20", features = ["rustls-tls", "json"], default-features = false }
-serde = { version = "1.0.219",features = ["derive"] }
+serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 serde_yaml = "0.9.34"
 strip-prefix-suffix-sane = "0.1.0"
 tokio = { version = "1.45.1", features = ["full"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+sqlx = { version = "0.8", features = ["runtime-tokio", "derive", "sqlite", "chrono", "json"] }
+chrono = "0.4.41"

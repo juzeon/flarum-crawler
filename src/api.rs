@@ -46,6 +46,9 @@ pub async fn get_discussion(
         .as_str()
         .context("no title")?
         .to_string();
+    let is_frontpage = discussion_json["data"]["attributes"]["frontpage"]
+        .as_bool()
+        .context("cannot get frontpage")?;
     let vec = vec![];
     let tag_ids = discussion_json["data"]["relationships"]["tags"]["data"]
         .as_array()
@@ -123,6 +126,12 @@ pub async fn get_discussion(
         },
         title,
         tags,
+        is_frontpage,
+        created_at: if let Some(post) = posts.get(0) {
+            post.created_at
+        } else {
+            Default::default()
+        },
         posts,
     })
 }
@@ -184,14 +193,14 @@ async fn get_post_id_group(
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
-            let created_at = item["attributes"]["createdAt"]
-                .as_str()
-                .unwrap_or_default()
-                .to_string();
+            let created_at = chrono::DateTime::parse_from_rfc3339(
+                item["attributes"]["createdAt"].as_str().unwrap_or_default(),
+            )
+            .unwrap_or_default();
             let reply_to_id = if let Some(caps) = POST_MENTION_RE.captures(html.as_str()) {
-                Some(caps[1].parse::<u64>().unwrap_or_default())
+                caps[1].parse::<u64>().unwrap_or_default()
             } else {
-                None
+                0
             };
             let user_id = item["relationships"]["user"]["data"]["id"]
                 .as_str()

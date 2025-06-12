@@ -5,7 +5,8 @@ use tokio::fs::read_to_string;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub base_url: String,
-    pub concurrency:usize,
+    pub concurrency: usize,
+    pub db: String,
 }
 impl Config {
     pub async fn load(path: &str) -> anyhow::Result<Self> {
