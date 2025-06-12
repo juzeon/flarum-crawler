@@ -8,6 +8,7 @@ use sqlx::{Executor, SqlitePool, query, query_as};
 pub struct FullOptions {
     pub config: Config,
     pub conn: SqlitePool,
+    pub max_id: u64,
 }
 pub async fn full(options: FullOptions) -> anyhow::Result<()> {
     let get_discussion_options = GetDiscussionOptionsBuilder::default()

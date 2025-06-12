@@ -23,7 +23,10 @@ struct Cli {
 #[derive(Subcommand, Clone)]
 enum SubCmd {
     Cron,
-    Full,
+    Full {
+        #[arg(long, short)]
+        max_id: u64,
+    },
 }
 #[tokio::main]
 async fn main() {
@@ -40,8 +43,14 @@ async fn main() {
     let conn = get_connection_pool(config.db.as_str()).await.unwrap();
     match cli.cmd {
         SubCmd::Cron => {}
-        SubCmd::Full => {
-            cmd::full::full(FullOptions { config, conn }).await.unwrap();
+        SubCmd::Full { max_id } => {
+            cmd::full::full(FullOptions {
+                config,
+                conn,
+                max_id,
+            })
+            .await
+            .unwrap();
         }
     }
 }
