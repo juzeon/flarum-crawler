@@ -1,5 +1,6 @@
 use crate::entity::{Discussion, Post};
 use anyhow::Context;
+use derive_builder::Builder;
 use regex::Regex;
 use reqwest::Client;
 use std::collections::HashMap;
@@ -9,7 +10,12 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tracing::{debug, info, instrument};
 
-static CONCURRENCY: usize = 20;
+#[derive(Debug, Clone, Builder)]
+pub struct GetDiscussionOptions {
+    pub base_url: String,
+    #[builder(default = 20)]
+    pub concurrency: usize,
+}
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
     Client::builder()
         .timeout(Duration::from_secs(15))
@@ -21,11 +27,11 @@ fn get_http_client() -> Client {
 }
 #[instrument(skip_all)]
 pub async fn get_discussion(
-    base_url: &str,
     id: u64,
+    options: GetDiscussionOptions,
     sem: Option<Arc<Semaphore>>,
 ) -> anyhow::Result<Discussion> {
-    let base_url = Arc::new(base_url.to_string());
+    let base_url = Arc::new(options.base_url.to_string());
     let client = get_http_client();
     let discussion_json: serde_json::Value = client
         .get(&format!(
@@ -80,7 +86,7 @@ pub async fn get_discussion(
         .collect::<Vec<String>>();
     let total = (post_ids.len() as f64 / 20f64).ceil() as usize;
     let mut set = JoinSet::new();
-    let sem = sem.unwrap_or_else(|| Arc::new(Semaphore::new(CONCURRENCY)));
+    let sem = sem.unwrap_or_else(|| Arc::new(Semaphore::new(options.concurrency)));
     for (ix, post_id_group) in post_ids
         .chunks(20)
         .map(|x| x.to_vec())
@@ -91,8 +97,8 @@ pub async fn get_discussion(
         let base_url = base_url.clone();
         set.spawn(async move {
             let _sem = sem_clone.acquire().await.unwrap();
-            debug!(ix, total, id, "Processing chunks");
-            let res = get_post_id_group(base_url.as_str(), post_id_group).await?;
+            debug!(ix, total, id, "Processing post chunks");
+            let res = get_post_id_group(id, base_url.as_str(), post_id_group).await?;
             Ok(res)
         });
     }
@@ -105,6 +111,16 @@ pub async fn get_discussion(
     let posts = post_groups.into_iter().flatten().collect::<Vec<_>>();
     Ok(Discussion {
         id,
+        user_id: if let Some(post) = posts.get(0) {
+            post.user_id
+        } else {
+            0
+        },
+        username: if let Some(post) = posts.get(0) {
+            post.username.to_string()
+        } else {
+            "".to_string()
+        },
         title,
         tags,
         posts,
@@ -116,6 +132,7 @@ static POST_MENTION_RE: LazyLock<Regex> =
 static POST_MENTION_A_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"<a.*?class="PostMention".*?</a>"#).unwrap());
 async fn get_post_id_group(
+    discussion_id: u64,
     base_url: &str,
     post_id_group: Vec<String>,
 ) -> anyhow::Result<Vec<Post>> {
@@ -182,7 +199,9 @@ async fn get_post_id_group(
                 .parse::<u64>()
                 .unwrap_or_default();
             let content = htmd::convert(POST_MENTION_A_RE.replace_all(html.as_str(), "").as_ref())
-                .unwrap_or(format!("<!-- HTML -->{}", html.as_str())).trim().to_string();
+                .unwrap_or(format!("<!-- HTML -->{}", html.as_str()))
+                .trim()
+                .to_string();
             Some(Post {
                 id: item["id"]
                     .as_str()
@@ -191,9 +210,10 @@ async fn get_post_id_group(
                     .unwrap_or_default(),
                 reply_to_id,
                 user_id: user_id.clone(),
-                user: users.get(&user_id).unwrap_or(&"".to_string()).to_string(),
+                username: users.get(&user_id).unwrap_or(&"".to_string()).to_string(),
                 content,
                 created_at,
+                discussion_id,
             })
         })
         .collect::<Vec<Post>>();

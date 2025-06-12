@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 anyhow = "1.0.98"
 clap = { version = "4.5.40", features = ["derive"] }
+derive_builder = "0.20.2"
 htmd = "0.2.2"
 regex = "1.11.1"
 reqwest = { version = "0.12.20", features = ["rustls-tls", "json"], default-features = false }
