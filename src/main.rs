@@ -10,6 +10,7 @@ use tracing_subscriber::util::SubscriberInitExt;
 mod api;
 mod cmd;
 mod config;
+mod crawler;
 mod db;
 mod entity;
 
@@ -24,8 +25,10 @@ struct Cli {
 enum SubCmd {
     Cron,
     Full {
-        #[arg(long, short)]
-        max_id: u64,
+        #[arg(long)]
+        min: u64,
+        #[arg(long)]
+        max: u64,
     },
 }
 #[tokio::main]
@@ -43,11 +46,12 @@ async fn main() {
     let conn = get_connection_pool(config.db.as_str()).await.unwrap();
     match cli.cmd {
         SubCmd::Cron => {}
-        SubCmd::Full { max_id } => {
+        SubCmd::Full { max, min } => {
             cmd::full::full(FullOptions {
                 config,
                 conn,
-                max_id,
+                max_id: max,
+                min_id: min,
             })
             .await
             .unwrap();

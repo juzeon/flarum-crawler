@@ -1,26 +1,35 @@
-use crate::api::GetDiscussionOptionsBuilder;
 use crate::config::Config;
-use crate::entity::{Discussion, Post};
+use crate::crawler::Crawler;
+use crate::entity::{Job, JobStatus};
 use derive_builder::Builder;
-use sqlx::{Executor, SqlitePool, query, query_as};
+use sqlx::SqlitePool;
+use std::collections::HashSet;
+use tracing::instrument;
 
 #[derive(Debug, Clone, Builder)]
 pub struct FullOptions {
     pub config: Config,
     pub conn: SqlitePool,
     pub max_id: u64,
+    pub min_id: u64,
 }
+#[instrument(skip_all)]
 pub async fn full(options: FullOptions) -> anyhow::Result<()> {
-    let get_discussion_options = GetDiscussionOptionsBuilder::default()
-        .base_url(options.config.base_url.to_string())
-        .concurrency(options.config.concurrency)
-        .build()?;
-    // let res=query("insert into posts (id,user_id,discussion_id,reply_to_id,username,content,created_at) values (?,?,?,?,?,?,?)")
-    //     .bind(1).execute(&options.conn).await?;
-    // Discussion::default().save(&mut *options.conn.begin().await?).await;
-    let res: Discussion = query_as("select * from discussions")
-        .fetch_one(&options.conn)
-        .await?;
-    dbg!(res);
+    let impossible_discussion_ids =
+        Job::find_by_entity_status("discussion", JobStatus::Impossible, &options.conn)
+            .await
+            .into_iter()
+            .map(|x| x.entity_id)
+            .collect::<HashSet<_>>();
+    let (crawler, sender) = Crawler::new(options.config, options.conn).await?;
+    let set = crawler.launch().await;
+    for id in options.min_id..=options.max_id {
+        if impossible_discussion_ids.contains(&id) {
+            continue;
+        }
+        sender.send(id).await?;
+    }
+    drop(sender);
+    set.join_all().await;
     Ok(())
 }

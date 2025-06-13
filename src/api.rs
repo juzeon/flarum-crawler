@@ -1,14 +1,21 @@
 use crate::entity::{Discussion, Post};
-use anyhow::Context;
+use anyhow::{Context, anyhow, bail};
 use derive_builder::Builder;
 use regex::Regex;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
+use thiserror::Error;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tracing::{debug, info, instrument};
+
+#[derive(Debug, Error)]
+pub enum ApiError {
+    #[error("discussion is impossible to fetch")]
+    ImpossibleDiscussion,
+}
 
 #[derive(Debug, Clone, Builder)]
 pub struct GetDiscussionOptions {
@@ -31,17 +38,25 @@ pub async fn get_discussion(
     options: GetDiscussionOptions,
     sem: Option<Arc<Semaphore>>,
 ) -> anyhow::Result<Discussion> {
+    let sem = sem.unwrap_or_else(|| Arc::new(Semaphore::new(options.concurrency)));
     let base_url = Arc::new(options.base_url.to_string());
     let client = get_http_client();
-    let discussion_json: serde_json::Value = client
-        .get(&format!(
+    let sem_quota = sem.acquire().await?;
+    let response = client
+        .get(format!(
             "{}/api/discussions/{}?bySlug=true&page[near]=0",
             base_url, id
         ))
         .send()
-        .await?
-        .json()
         .await?;
+    if [404u16, 403u16].contains(&response.status().as_u16()) {
+        return Err(anyhow!(ApiError::ImpossibleDiscussion));
+    }
+    if response.status() != 200 {
+        bail!("response error status: {}", response.status())
+    }
+    let discussion_json: serde_json::Value = response.json().await?;
+    drop(sem_quota);
     let title = discussion_json["data"]["attributes"]["title"]
         .as_str()
         .context("no title")?
@@ -53,13 +68,13 @@ pub async fn get_discussion(
     let tag_ids = discussion_json["data"]["relationships"]["tags"]["data"]
         .as_array()
         .unwrap_or(&vec)
-        .into_iter()
+        .iter()
         .map(|x| x["id"].as_str().unwrap_or_default())
         .collect::<Vec<_>>();
     let tags = discussion_json["included"]
         .as_array()
         .unwrap_or(&vec)
-        .into_iter()
+        .iter()
         .filter_map(|x| {
             if x["type"].as_str().unwrap_or_default() != "tags" {
                 return None;
@@ -78,7 +93,7 @@ pub async fn get_discussion(
     let post_ids = discussion_json["data"]["relationships"]["posts"]["data"]
         .as_array()
         .unwrap_or(&vec)
-        .into_iter()
+        .iter()
         .filter_map(|item| {
             if item["type"].as_str().unwrap_or_default() == "posts" {
                 Some(item["id"].as_str().unwrap_or_default().to_string())
@@ -89,12 +104,10 @@ pub async fn get_discussion(
         .collect::<Vec<String>>();
     let total = (post_ids.len() as f64 / 20f64).ceil() as usize;
     let mut set = JoinSet::new();
-    let sem = sem.unwrap_or_else(|| Arc::new(Semaphore::new(options.concurrency)));
     for (ix, post_id_group) in post_ids
         .chunks(20)
         .map(|x| x.to_vec())
         .enumerate()
-        .into_iter()
     {
         let sem_clone = sem.clone();
         let base_url = base_url.clone();
@@ -112,7 +125,7 @@ pub async fn get_discussion(
         .collect::<anyhow::Result<Vec<_>>>()?;
     post_groups.sort_by_key(|x| x[0].id);
     let posts = post_groups.into_iter().flatten().collect::<Vec<_>>();
-    let first_post = if let Some(post) = posts.get(0) {
+    let first_post = if let Some(post) = posts.first() {
         post
     } else {
         &Post::default()
@@ -150,7 +163,7 @@ async fn get_post_id_group(
     let users = post_json["included"]
         .as_array()
         .unwrap_or(&vec)
-        .into_iter()
+        .iter()
         .filter_map(|item| {
             if item["type"].as_str().unwrap_or_default() != "users" {
                 return None;
@@ -177,7 +190,7 @@ async fn get_post_id_group(
     let posts = post_json["data"]
         .as_array()
         .unwrap_or(&vec)
-        .into_iter()
+        .iter()
         .filter_map(|item| {
             if item["type"].as_str().unwrap_or_default() != "posts" {
                 return None;
@@ -220,7 +233,7 @@ async fn get_post_id_group(
                     .parse::<u64>()
                     .unwrap_or_default(),
                 reply_to_id,
-                user_id: user_id.clone(),
+                user_id,
                 username: user.0.to_string(),
                 user_display_name: user.1.to_string(),
                 content,
