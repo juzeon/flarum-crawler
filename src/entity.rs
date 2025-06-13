@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use chrono::{FixedOffset, Utc};
-use sqlx::{FromRow, SqlitePool, query};
+use sqlx::{Executor, FromRow, Sqlite, query, SqlitePool};
 
 #[derive(Debug, Clone, Default, FromRow)]
 pub struct Post {
@@ -9,6 +9,7 @@ pub struct Post {
     pub discussion_id: u64,
     pub reply_to_id: u64,
     pub username: String,
+    pub user_display_name: String,
     pub content: String,
     pub created_at: chrono::DateTime<FixedOffset>,
 }
@@ -17,6 +18,7 @@ pub struct Discussion {
     pub id: u64,
     pub user_id: u64,
     pub username: String,
+    pub user_display_name: String,
     pub title: String,
     #[sqlx(json)]
     pub tags: Vec<String>,
@@ -26,7 +28,7 @@ pub struct Discussion {
     pub created_at: chrono::DateTime<FixedOffset>,
 }
 impl Discussion {
-    pub async fn save(&self, pool: &SqlitePool) {
+    pub async fn save<E>(&self, handle: &SqlitePool) {
         // TODO upsert
         query("insert into discussions (id,user_id,username,title,tags,is_frontpage,created_at) values (?,?,?,?,?,?,?)")
             .bind(self.id as i64)
@@ -36,7 +38,7 @@ impl Discussion {
             .bind(serde_json::to_string(&self.tags).unwrap())
             .bind(self.is_frontpage)
             .bind(self.created_at)
-            .execute(pool).await.unwrap();
+            .execute(handle).await.unwrap();
     }
 }
 #[derive(Debug, Clone, FromRow)]

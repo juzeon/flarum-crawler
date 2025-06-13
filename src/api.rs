@@ -112,26 +112,20 @@ pub async fn get_discussion(
         .collect::<anyhow::Result<Vec<_>>>()?;
     post_groups.sort_by_key(|x| x[0].id);
     let posts = post_groups.into_iter().flatten().collect::<Vec<_>>();
+    let first_post = if let Some(post) = posts.get(0) {
+        post
+    } else {
+        &Post::default()
+    };
     Ok(Discussion {
         id,
-        user_id: if let Some(post) = posts.get(0) {
-            post.user_id
-        } else {
-            0
-        },
-        username: if let Some(post) = posts.get(0) {
-            post.username.to_string()
-        } else {
-            "".to_string()
-        },
+        user_id: first_post.user_id,
+        username: first_post.username.to_string(),
+        user_display_name: first_post.user_display_name.to_string(),
         title,
         tags,
         is_frontpage,
-        created_at: if let Some(post) = posts.get(0) {
-            post.created_at
-        } else {
-            Default::default()
-        },
+        created_at: first_post.created_at,
         posts,
     })
 }
@@ -167,13 +161,19 @@ async fn get_post_id_group(
                     .unwrap_or_default()
                     .parse::<u64>()
                     .unwrap_or_default(),
-                item["attributes"]["displayName"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_string(),
+                (
+                    item["attributes"]["username"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    item["attributes"]["displayName"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                ),
             ))
         })
-        .collect::<HashMap<u64, String>>();
+        .collect::<HashMap<u64, (String, String)>>();
     let posts = post_json["data"]
         .as_array()
         .unwrap_or(&vec)
@@ -211,6 +211,8 @@ async fn get_post_id_group(
                 .unwrap_or(format!("<!-- HTML -->{}", html.as_str()))
                 .trim()
                 .to_string();
+            let _user_tmp = &("".to_string(), "".to_string());
+            let user = users.get(&user_id).unwrap_or(_user_tmp);
             Some(Post {
                 id: item["id"]
                     .as_str()
@@ -219,7 +221,8 @@ async fn get_post_id_group(
                     .unwrap_or_default(),
                 reply_to_id,
                 user_id: user_id.clone(),
-                username: users.get(&user_id).unwrap_or(&"".to_string()).to_string(),
+                username: user.0.to_string(),
+                user_display_name: user.1.to_string(),
                 content,
                 created_at,
                 discussion_id,

@@ -17,6 +17,7 @@ pub async fn full(options: FullOptions) -> anyhow::Result<()> {
         .build()?;
     // let res=query("insert into posts (id,user_id,discussion_id,reply_to_id,username,content,created_at) values (?,?,?,?,?,?,?)")
     //     .bind(1).execute(&options.conn).await?;
+    // Discussion::default().save(&mut *options.conn.begin().await?).await;
     let res: Discussion = query_as("select * from discussions")
         .fetch_one(&options.conn)
         .await?;
