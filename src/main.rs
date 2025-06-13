@@ -21,7 +21,9 @@ struct Cli {
 }
 #[derive(Subcommand, Clone)]
 enum SubCmd {
-    Cron,
+    Cron {
+        page: usize,
+    },
     Retry,
     Full {
         #[arg(long)]
@@ -47,7 +49,7 @@ async fn main() {
     let conn = get_connection_pool(config.db.as_str()).await.unwrap();
     let cmd = Cmd::new(config, conn);
     match cli.cmd {
-        SubCmd::Cron => {}
+        SubCmd::Cron { page } => cmd.cron(page).await.unwrap(),
         SubCmd::Full {
             min,
             max,

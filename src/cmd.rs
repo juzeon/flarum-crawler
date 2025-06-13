@@ -1,3 +1,4 @@
+use crate::api::get_index_page;
 use crate::config::Config;
 use crate::crawler::Crawler;
 use crate::entity::{Job, JobStatus};
@@ -13,6 +14,21 @@ pub struct Cmd {
 impl Cmd {
     pub fn new(config: Config, conn: SqlitePool) -> Self {
         Self { config, conn }
+    }
+    #[instrument(skip_all)]
+    pub async fn cron(&self, page: usize) -> anyhow::Result<()> {
+        let (crawler, sender) = Crawler::new(self.config.clone(), self.conn.clone()).await;
+        let set = crawler.launch().await;
+        let mut ids = vec![];
+        for i in 1..=page {
+            ids.extend(get_index_page(self.config.base_url.as_str(), i).await?)
+        }
+        for id in ids {
+            sender.send(id).await?;
+        }
+        drop(sender);
+        set.join_all().await;
+        Ok(())
     }
     #[instrument(skip_all)]
     pub async fn retry(&self) {

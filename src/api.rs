@@ -32,6 +32,47 @@ static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
 fn get_http_client() -> Client {
     HTTP_CLIENT.clone()
 }
+pub async fn get_index_page(base_url: &str, page: usize) -> anyhow::Result<Vec<u64>> {
+    let client = get_http_client();
+    debug!(page, "Getting index page");
+    let response = client
+        .get(format!(
+            "{}/api/discussions?\
+    include=user,lastPostedUser,tags,tags.parent,firstPost,recipientUsers,recipientGroups&sort=\
+    &page[offset]={}",
+            base_url,
+            (page - 1) * 20
+        ))
+        .send()
+        .await?;
+    let response = match response.error_for_status() {
+        Ok(response) => response,
+        Err(err) => {
+            bail!("response error status: {}", err);
+        }
+    };
+    let payload: serde_json::Value = response.json().await?;
+    let vec = vec![];
+    let ids = payload["data"]
+        .as_array()
+        .unwrap_or(&vec)
+        .iter()
+        .filter_map(|x| {
+            if x["type"] != "discussions" {
+                return None;
+            }
+            Some(
+                x["id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .parse::<u64>()
+                    .unwrap_or_default(),
+            )
+        })
+        .collect::<Vec<_>>();
+    debug!(len = ids.len(), page, "Got ids from index page");
+    Ok(ids)
+}
 #[instrument(skip_all)]
 pub async fn get_discussion(
     id: u64,
@@ -42,7 +83,7 @@ pub async fn get_discussion(
     let base_url = Arc::new(options.base_url.to_string());
     let client = get_http_client();
     let sem_quota = sem.acquire().await?;
-    debug!(id, "Processing discussion");
+    debug!(id, "Processing api/discussion");
     let response = client
         .get(format!(
             "{}/api/discussions/{}?bySlug=true&page[near]=0",
@@ -50,12 +91,16 @@ pub async fn get_discussion(
         ))
         .send()
         .await?;
+    debug!(id, "Finished api/discussion");
     if [404u16, 403u16].contains(&response.status().as_u16()) {
         return Err(anyhow!(ApiError::ImpossibleDiscussion));
     }
-    if response.status() != 200 {
-        bail!("response error status: {}", response.status())
-    }
+    let response = match response.error_for_status() {
+        Ok(response) => response,
+        Err(err) => {
+            bail!("response error status: {}", err);
+        }
+    };
     let discussion_json: serde_json::Value = response.json().await?;
     drop(sem_quota);
     let title = discussion_json["data"]["attributes"]["title"]
@@ -110,8 +155,9 @@ pub async fn get_discussion(
         let base_url = base_url.clone();
         set.spawn(async move {
             let _sem = sem_clone.acquire().await.unwrap();
-            debug!(ix, total, id, "Processing post chunks");
+            debug!(ix, total, id, "Processing api/post chunks");
             let res = get_post_id_group(id, base_url.as_str(), post_id_group).await?;
+            debug!(ix, total, id, "Finished api/post chunks");
             Ok(res)
         });
     }
@@ -155,7 +201,14 @@ async fn get_post_id_group(
         base_url,
         post_id_group.join(",")
     );
-    let post_json: serde_json::Value = client.get(url.as_str()).send().await?.json().await?;
+    let response = client.get(url.as_str()).send().await?;
+    let response = match response.error_for_status() {
+        Ok(response) => response,
+        Err(err) => {
+            bail!("response error status: {}", err);
+        }
+    };
+    let post_json: serde_json::Value = response.json().await?;
     let vec = vec![];
     let users = post_json["included"]
         .as_array()
