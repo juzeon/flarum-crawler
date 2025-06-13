@@ -42,6 +42,7 @@ pub async fn get_discussion(
     let base_url = Arc::new(options.base_url.to_string());
     let client = get_http_client();
     let sem_quota = sem.acquire().await?;
+    debug!(id, "Processing discussion");
     let response = client
         .get(format!(
             "{}/api/discussions/{}?bySlug=true&page[near]=0",
@@ -104,11 +105,7 @@ pub async fn get_discussion(
         .collect::<Vec<String>>();
     let total = (post_ids.len() as f64 / 20f64).ceil() as usize;
     let mut set = JoinSet::new();
-    for (ix, post_id_group) in post_ids
-        .chunks(20)
-        .map(|x| x.to_vec())
-        .enumerate()
-    {
+    for (ix, post_id_group) in post_ids.chunks(20).map(|x| x.to_vec()).enumerate() {
         let sem_clone = sem.clone();
         let base_url = base_url.clone();
         set.spawn(async move {

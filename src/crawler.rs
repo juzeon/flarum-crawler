@@ -17,13 +17,14 @@ pub struct Crawler {
     conn: SqlitePool,
 }
 impl Crawler {
-    pub async fn new(config: Config, conn: SqlitePool) -> anyhow::Result<(Self, Sender<u64>)> {
+    pub async fn new(config: Config, conn: SqlitePool) -> (Self, Sender<u64>) {
         let get_discussion_options = GetDiscussionOptionsBuilder::default()
             .base_url(config.base_url.to_string())
             .concurrency(config.concurrency)
-            .build()?;
+            .build()
+            .unwrap();
         let (sender, receiver) = async_channel::bounded::<u64>(1);
-        Ok((
+        (
             Self {
                 sem: Arc::new(Semaphore::new(config.concurrency)),
                 config,
@@ -32,7 +33,7 @@ impl Crawler {
                 conn,
             },
             sender,
-        ))
+        )
     }
     pub async fn launch(&self) -> JoinSet<()> {
         let mut set = JoinSet::new();
