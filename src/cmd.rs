@@ -66,7 +66,11 @@ impl Cmd {
         let set = crawler.launch().await;
         let mut current_page = page_start;
         loop {
-            info!(current_page, "Processing index page");
+            info!(
+                current_page,
+                offset = (current_page - 1) * 20,
+                "Processing index page"
+            );
             let ids = loop {
                 match get_index_page(
                     self.config.base_url.as_str(),

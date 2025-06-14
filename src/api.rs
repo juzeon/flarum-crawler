@@ -27,7 +27,7 @@ pub struct GetDiscussionOptions {
 }
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
     Client::builder()
-        .timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(60))
         .build()
         .unwrap()
 });
@@ -188,9 +188,19 @@ pub async fn get_discussion(
             post_id_group_count += 1;
             set.spawn(async move {
                 let _sem = sem_clone.acquire().await.unwrap();
-                debug!(ix, total, id, "Processing api/post chunks");
+                debug!(
+                    current = ix + 1,
+                    total,
+                    discussion = id,
+                    "Processing api/post chunks"
+                );
                 let res = get_post_id_group(id, base_url.as_str(), post_id_group).await?;
-                debug!(ix, total, id, "Finished api/post chunks");
+                debug!(
+                    current = ix + 1,
+                    total,
+                    discussion = id,
+                    "Finished api/post chunks"
+                );
                 Ok(res)
             });
         }
