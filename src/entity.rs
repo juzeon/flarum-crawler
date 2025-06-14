@@ -16,6 +16,13 @@ pub struct Post {
     pub created_at: chrono::DateTime<FixedOffset>,
 }
 impl Post {
+    pub async fn find_by_discussion_id(id: u64, pool: &SqlitePool) -> Vec<Post> {
+        query_as(r"select * from posts where discussion_id=?")
+            .bind(id as i64)
+            .fetch_all(pool)
+            .await
+            .unwrap()
+    }
     pub async fn save(&self, pool: &SqlitePool) {
         query(
             r#"
@@ -61,17 +68,15 @@ pub struct Discussion {
 }
 impl Discussion {
     // TODO sort: ***REMOVED*** <--
-    // pub async fn find_by_id(id: u64, pool: &SqlitePool) -> Option<Discussion> {
-    //     let Some(mut discussion)=query_as::<_,Discussion>(r"select * from discussions where id=?")
-    //         .bind(id as i64)
-    //         .fetch_optional(pool)
-    //         .await
-    //         .unwrap() else{
-    //         return None;
-    //     };
-    //     // TODO find posts
-    //     Some()
-    // }
+    pub async fn find_by_id(id: u64, pool: &SqlitePool) -> Option<Discussion> {
+        let mut discussion = query_as::<_, Discussion>(r"select * from discussions where id=?")
+            .bind(id as i64)
+            .fetch_optional(pool)
+            .await
+            .unwrap()?;
+        discussion.posts = Post::find_by_discussion_id(discussion.id, pool).await;
+        Some(discussion)
+    }
     pub async fn save_with_posts(&self, pool: &SqlitePool) {
         let mut tx = pool.begin().await.unwrap();
         query(

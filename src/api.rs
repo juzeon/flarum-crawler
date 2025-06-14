@@ -218,6 +218,9 @@ static POST_MENTION_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"class="PostMention" data-id="(\d+)""#).unwrap());
 static POST_MENTION_A_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"<a.*?class="PostMention".*?</a>"#).unwrap());
+static POST_MENTION_DELETED: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#"<span class="PostMention PostMention--deleted".*?</span>"#).unwrap()
+});
 async fn get_post_id_group(
     discussion_id: u64,
     base_url: &str,
@@ -254,10 +257,11 @@ async fn get_post_id_group(
             {
                 return None;
             }
-            let html = item["attributes"]["contentHtml"]
+            let mut html = item["attributes"]["contentHtml"]
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
+            html = POST_MENTION_DELETED.replace_all(&html, "").to_string();
             let created_at = chrono::DateTime::parse_from_rfc3339(
                 item["attributes"]["createdAt"].as_str().unwrap_or_default(),
             )

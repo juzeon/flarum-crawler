@@ -5,6 +5,7 @@ use crate::config::Config;
 use crate::entity::{Discussion, Job, JobStatus};
 use async_channel::{Receiver, Sender};
 use sqlx::SqlitePool;
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
@@ -49,13 +50,15 @@ impl Crawler {
     async fn worker(&self, ix: usize) {
         while let Ok(id) = self.receiver.recv().await {
             info!(id, "Getting discussion");
-            // Discussion::find_by_id(id);
-            let get_discussion_res = get_discussion(
-                id,
-                self.get_discussion_options.clone(),
-                Some(self.sem.clone()),
-            )
-            .await;
+            let mut options = self.get_discussion_options.clone();
+            if let Some(discussion) = Discussion::find_by_id(id, &self.conn).await {
+                options.existing_post_ids = discussion
+                    .posts
+                    .into_iter()
+                    .map(|x| x.id)
+                    .collect::<HashSet<_>>();
+            }
+            let get_discussion_res = get_discussion(id, options, Some(self.sem.clone())).await;
             match get_discussion_res {
                 Ok(discussion_res) => match discussion_res {
                     GetDiscussionResult::Impossible => {
