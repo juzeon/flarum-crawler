@@ -173,29 +173,33 @@ pub async fn get_discussion(
     )?;
     let total = (post_ids.len() as f64 / 20f64).ceil() as usize;
     let mut set = JoinSet::new();
-    // TODO filter existing post id
     let mut post_id_group_count = 0;
-    for (ix, post_id_group) in post_ids.chunks(20).map(|x| x.to_vec()).enumerate() {
-        let sem_clone = sem.clone();
-        let base_url = base_url.clone();
-        post_id_group_count += 1;
-        set.spawn(async move {
-            let _sem = sem_clone.acquire().await.unwrap();
-            debug!(ix, total, id, "Processing api/post chunks");
-            let res = get_post_id_group(id, base_url.as_str(), post_id_group).await?;
-            debug!(ix, total, id, "Finished api/post chunks");
-            Ok(res)
-        });
-    }
-    let mut post_groups = set
-        .join_all()
-        .await
-        .into_iter()
-        .filter_map(|x: anyhow::Result<Vec<Post>>| x.ok())
-        .collect::<Vec<_>>();
-    post_groups.sort_by_key(|x| x[0].id);
-    let is_partial = post_groups.len() != post_id_group_count;
-    let posts = post_groups.into_iter().flatten().collect::<Vec<_>>();
+    let mut is_partial = false;
+    let posts = if !post_ids.is_empty() {
+        for (ix, post_id_group) in post_ids.chunks(20).map(|x| x.to_vec()).enumerate() {
+            let sem_clone = sem.clone();
+            let base_url = base_url.clone();
+            post_id_group_count += 1;
+            set.spawn(async move {
+                let _sem = sem_clone.acquire().await.unwrap();
+                debug!(ix, total, id, "Processing api/post chunks");
+                let res = get_post_id_group(id, base_url.as_str(), post_id_group).await?;
+                debug!(ix, total, id, "Finished api/post chunks");
+                Ok(res)
+            });
+        }
+        let mut post_groups = set
+            .join_all()
+            .await
+            .into_iter()
+            .filter_map(|x: anyhow::Result<Vec<Post>>| x.ok())
+            .collect::<Vec<_>>();
+        post_groups.sort_by_key(|x| x[0].id);
+        is_partial = post_groups.len() != post_id_group_count;
+        post_groups.into_iter().flatten().collect::<Vec<_>>()
+    } else {
+        vec![]
+    };
     let discussion = Discussion {
         id,
         user_id,
