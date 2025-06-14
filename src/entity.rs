@@ -67,7 +67,6 @@ pub struct Discussion {
     pub created_at: chrono::DateTime<FixedOffset>,
 }
 impl Discussion {
-    // TODO sort: ***REMOVED*** <--
     pub async fn find_by_id(id: u64, pool: &SqlitePool) -> Option<Discussion> {
         let mut discussion = query_as::<_, Discussion>(r"select * from discussions where id=?")
             .bind(id as i64)
