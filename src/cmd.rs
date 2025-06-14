@@ -4,7 +4,9 @@ use crate::crawler::Crawler;
 use crate::entity::{Job, JobStatus};
 use sqlx::SqlitePool;
 use std::collections::HashSet;
-use tracing::instrument;
+use std::time::Duration;
+use tokio::time::sleep;
+use tracing::{error, info, instrument};
 
 #[derive(Clone)]
 pub struct Cmd {
@@ -21,7 +23,7 @@ impl Cmd {
         let set = crawler.launch().await;
         let mut ids = vec![];
         for i in 1..=page {
-            ids.extend(get_index_page(self.config.base_url.as_str(), i).await?)
+            ids.extend(get_index_page(self.config.base_url.as_str(), i, None).await?)
         }
         for id in ids {
             sender.send(id).await?;
@@ -45,7 +47,7 @@ impl Cmd {
         set.join_all().await;
     }
     #[instrument(skip_all)]
-    pub async fn full(&self, min_id: u64, max_id: u64, ignore_existed: bool) {
+    pub async fn full(&self, page_start: usize, ignore_existed: bool) {
         let mut ignore_ids =
             Job::find_by_entity_status("discussion", JobStatus::Impossible, &self.conn)
                 .await
@@ -62,11 +64,34 @@ impl Cmd {
         }
         let (crawler, sender) = Crawler::new(self.config.clone(), self.conn.clone()).await;
         let set = crawler.launch().await;
-        for id in min_id..=max_id {
-            if ignore_ids.contains(&id) {
-                continue;
+        let mut current_page = page_start;
+        loop {
+            info!(current_page, "Processing index page");
+            let ids = loop {
+                match get_index_page(
+                    self.config.base_url.as_str(),
+                    current_page,
+                    Some("createdAt"),
+                )
+                .await
+                {
+                    Ok(res) => break res,
+                    Err(err) => {
+                        error!("Error get index page: {:#}", err);
+                        sleep(Duration::from_secs(1)).await;
+                    }
+                }
+            };
+            if ids.is_empty() {
+                break;
             }
-            sender.send(id).await.unwrap();
+            for id in ids {
+                if ignore_ids.contains(&id) {
+                    continue;
+                }
+                sender.send(id).await.unwrap();
+            }
+            current_page += 1;
         }
         drop(sender);
         set.join_all().await;

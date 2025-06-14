@@ -34,15 +34,21 @@ static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
 fn get_http_client() -> Client {
     HTTP_CLIENT.clone()
 }
-pub async fn get_index_page(base_url: &str, page: usize) -> anyhow::Result<Vec<u64>> {
+pub async fn get_index_page(
+    base_url: &str,
+    page: usize,
+    sort: Option<&str>,
+) -> anyhow::Result<Vec<u64>> {
+    let sort = sort.unwrap_or("");
     let client = get_http_client();
     debug!(page, "Getting index page");
     let response = client
         .get(format!(
             "{}/api/discussions?\
-    include=user,lastPostedUser,tags,tags.parent,firstPost,recipientUsers,recipientGroups&sort=\
+    include=user,lastPostedUser,tags,tags.parent,firstPost,recipientUsers,recipientGroups&sort={}\
     &page[offset]={}",
             base_url,
+            sort,
             (page - 1) * 20
         ))
         .send()

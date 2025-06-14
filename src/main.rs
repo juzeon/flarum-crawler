@@ -26,10 +26,8 @@ enum SubCmd {
     },
     Retry,
     Full {
-        #[arg(long)]
-        min: u64,
-        #[arg(long)]
-        max: u64,
+        #[arg(short, long, default_value_t = 1)]
+        page_start: usize,
         #[arg(short, long)]
         ignore_existed: bool,
     },
@@ -51,11 +49,10 @@ async fn main() {
     match cli.cmd {
         SubCmd::Cron { page } => cmd.cron(page).await.unwrap(),
         SubCmd::Full {
-            min,
-            max,
+            page_start,
             ignore_existed,
         } => {
-            cmd.full(min, max, ignore_existed).await;
+            cmd.full(page_start, ignore_existed).await;
         }
         SubCmd::Retry => {
             cmd.retry().await;
