@@ -200,7 +200,7 @@ pub async fn get_discussion(
             .into_iter()
             .filter_map(|x: anyhow::Result<Vec<Post>>| x.ok())
             .collect::<Vec<_>>();
-        post_groups.sort_by_key(|x| x[0].id);
+        post_groups.sort_by_key(|x| x.first().map_or(0, |x| x.id));
         is_partial = post_groups.len() != post_id_group_count;
         post_groups.into_iter().flatten().collect::<Vec<_>>()
     } else {

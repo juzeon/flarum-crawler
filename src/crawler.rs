@@ -91,7 +91,7 @@ impl Crawler {
                         }
                         .save(&self.conn)
                         .await;
-                        info!(id, "Saved discussion (partial)");
+                        warn!(id, "Saved discussion (partial)");
                     }
                 },
                 Err(err) => {
