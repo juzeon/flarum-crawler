@@ -1,12 +1,14 @@
-use crate::api::{ApiError, GetDiscussionOptions, GetDiscussionOptionsBuilder, get_discussion};
+use crate::api::{
+    GetDiscussionOptions, GetDiscussionOptionsBuilder, GetDiscussionResult, get_discussion,
+};
 use crate::config::Config;
-use crate::entity::{Job, JobStatus};
+use crate::entity::{Discussion, Job, JobStatus};
 use async_channel::{Receiver, Sender};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
-use tracing::{error, info, instrument};
+use tracing::{error, info, instrument, warn};
 
 #[derive(Clone)]
 pub struct Crawler {
@@ -47,37 +49,54 @@ impl Crawler {
     async fn worker(&self, ix: usize) {
         while let Ok(id) = self.receiver.recv().await {
             info!(id, "Getting discussion");
-            let discussion_res = get_discussion(
+            // Discussion::find_by_id(id);
+            let get_discussion_res = get_discussion(
                 id,
                 self.get_discussion_options.clone(),
                 Some(self.sem.clone()),
             )
             .await;
-            match discussion_res {
-                Ok(discussion) => {
-                    discussion.save_with_posts(&self.conn).await;
-                    Job {
-                        entity: "discussion".to_string(),
-                        entity_id: id,
-                        status: JobStatus::Success,
+            match get_discussion_res {
+                Ok(discussion_res) => match discussion_res {
+                    GetDiscussionResult::Impossible => {
+                        warn!(id, "Impossible to get discussion");
+                        Job {
+                            entity: "discussion".to_string(),
+                            entity_id: id,
+                            status: JobStatus::Impossible,
+                        }
+                        .save(&self.conn)
+                        .await;
                     }
-                    .save(&self.conn)
-                    .await;
-                    info!(id, "Saved discussion");
-                }
+                    GetDiscussionResult::Ok(discussion) => {
+                        discussion.save_with_posts(&self.conn).await;
+                        Job {
+                            entity: "discussion".to_string(),
+                            entity_id: id,
+                            status: JobStatus::Success,
+                        }
+                        .save(&self.conn)
+                        .await;
+                        info!(id, "Saved discussion");
+                    }
+                    GetDiscussionResult::PartialError(discussion) => {
+                        discussion.save_with_posts(&self.conn).await;
+                        Job {
+                            entity: "discussion".to_string(),
+                            entity_id: id,
+                            status: JobStatus::Partial,
+                        }
+                        .save(&self.conn)
+                        .await;
+                        info!(id, "Saved discussion (partial)");
+                    }
+                },
                 Err(err) => {
                     error!(id, "Cannot get discussion: {:#}", err);
                     Job {
                         entity: "discussion".to_string(),
                         entity_id: id,
-                        status: if matches!(
-                            err.root_cause().downcast_ref(),
-                            Some(ApiError::ImpossibleDiscussion)
-                        ) {
-                            JobStatus::Impossible
-                        } else {
-                            JobStatus::Failed
-                        },
+                        status: JobStatus::Failed,
                     }
                     .save(&self.conn)
                     .await;

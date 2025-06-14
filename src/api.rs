@@ -3,7 +3,7 @@ use anyhow::{Context, anyhow, bail};
 use derive_builder::Builder;
 use regex::Regex;
 use reqwest::{Client, StatusCode};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 use thiserror::Error;
@@ -11,10 +11,10 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 use tracing::{debug, info, instrument};
 
-#[derive(Debug, Error)]
-pub enum ApiError {
-    #[error("discussion is impossible to fetch")]
-    ImpossibleDiscussion,
+pub enum GetDiscussionResult {
+    Impossible,
+    Ok(Discussion),
+    PartialError(Discussion),
 }
 
 #[derive(Debug, Clone, Builder)]
@@ -22,6 +22,8 @@ pub struct GetDiscussionOptions {
     pub base_url: String,
     #[builder(default = 20)]
     pub concurrency: usize,
+    #[builder(default=HashSet::new())]
+    pub existing_post_ids: HashSet<u64>,
 }
 static HTTP_CLIENT: LazyLock<Client> = LazyLock::new(|| {
     Client::builder()
@@ -78,7 +80,7 @@ pub async fn get_discussion(
     id: u64,
     options: GetDiscussionOptions,
     sem: Option<Arc<Semaphore>>,
-) -> anyhow::Result<Discussion> {
+) -> anyhow::Result<GetDiscussionResult> {
     let sem = sem.unwrap_or_else(|| Arc::new(Semaphore::new(options.concurrency)));
     let base_url = Arc::new(options.base_url.to_string());
     let client = get_http_client();
@@ -93,7 +95,7 @@ pub async fn get_discussion(
         .await?;
     debug!(id, "Finished api/discussion");
     if [404u16, 403u16].contains(&response.status().as_u16()) {
-        return Err(anyhow!(ApiError::ImpossibleDiscussion));
+        return Ok(GetDiscussionResult::Impossible);
     }
     let response = match response.error_for_status() {
         Ok(response) => response,
@@ -142,17 +144,41 @@ pub async fn get_discussion(
         .iter()
         .filter_map(|item| {
             if item["type"].as_str().unwrap_or_default() == "posts" {
-                Some(item["id"].as_str().unwrap_or_default().to_string())
+                let post_id = item["id"].as_str().unwrap_or_default().to_string();
+                if options
+                    .existing_post_ids
+                    .contains(&post_id.parse::<u64>().unwrap_or_default())
+                {
+                    return None;
+                }
+                Some(post_id)
             } else {
                 None
             }
         })
         .collect::<Vec<String>>();
+    let users_map = get_users_map(&discussion_json["included"]);
+    let user_id = discussion_json["data"]["relationships"]["user"]["data"]["id"]
+        .as_str()
+        .unwrap_or_default()
+        .parse::<u64>()?;
+    let (username, user_display_name) = users_map
+        .get(&user_id)
+        .map(|x| (x.0.to_string(), x.1.to_string()))
+        .unwrap_or_default();
+    let created_at = chrono::DateTime::parse_from_rfc3339(
+        discussion_json["data"]["attributes"]["createdAt"]
+            .as_str()
+            .unwrap_or_default(),
+    )?;
     let total = (post_ids.len() as f64 / 20f64).ceil() as usize;
     let mut set = JoinSet::new();
+    // TODO filter existing post id
+    let mut post_id_group_count = 0;
     for (ix, post_id_group) in post_ids.chunks(20).map(|x| x.to_vec()).enumerate() {
         let sem_clone = sem.clone();
         let base_url = base_url.clone();
+        post_id_group_count += 1;
         set.spawn(async move {
             let _sem = sem_clone.acquire().await.unwrap();
             debug!(ix, total, id, "Processing api/post chunks");
@@ -165,25 +191,27 @@ pub async fn get_discussion(
         .join_all()
         .await
         .into_iter()
-        .collect::<anyhow::Result<Vec<_>>>()?;
+        .filter_map(|x: anyhow::Result<Vec<Post>>| x.ok())
+        .collect::<Vec<_>>();
     post_groups.sort_by_key(|x| x[0].id);
+    let is_partial = post_groups.len() != post_id_group_count;
     let posts = post_groups.into_iter().flatten().collect::<Vec<_>>();
-    let first_post = if let Some(post) = posts.first() {
-        post
-    } else {
-        &Post::default()
-    };
-    Ok(Discussion {
+    let discussion = Discussion {
         id,
-        user_id: first_post.user_id,
-        username: first_post.username.to_string(),
-        user_display_name: first_post.user_display_name.to_string(),
+        user_id,
+        username,
+        user_display_name,
         title,
         tags,
         is_frontpage,
-        created_at: first_post.created_at,
+        created_at,
         posts,
-    })
+    };
+    if is_partial {
+        Ok(GetDiscussionResult::PartialError(discussion))
+    } else {
+        Ok(GetDiscussionResult::Ok(discussion))
+    }
 }
 
 static POST_MENTION_RE: LazyLock<Regex> =
@@ -210,33 +238,7 @@ async fn get_post_id_group(
     };
     let post_json: serde_json::Value = response.json().await?;
     let vec = vec![];
-    let users = post_json["included"]
-        .as_array()
-        .unwrap_or(&vec)
-        .iter()
-        .filter_map(|item| {
-            if item["type"].as_str().unwrap_or_default() != "users" {
-                return None;
-            }
-            Some((
-                item["id"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .parse::<u64>()
-                    .unwrap_or_default(),
-                (
-                    item["attributes"]["username"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string(),
-                    item["attributes"]["displayName"]
-                        .as_str()
-                        .unwrap_or_default()
-                        .to_string(),
-                ),
-            ))
-        })
-        .collect::<HashMap<u64, (String, String)>>();
+    let users = get_users_map(&post_json["included"]);
     let posts = post_json["data"]
         .as_array()
         .unwrap_or(&vec)
@@ -293,4 +295,34 @@ async fn get_post_id_group(
         })
         .collect::<Vec<Post>>();
     Ok(posts)
+}
+fn get_users_map(arr_v: &serde_json::Value) -> HashMap<u64, (String, String)> {
+    let vec = vec![];
+    arr_v
+        .as_array()
+        .unwrap_or(&vec)
+        .iter()
+        .filter_map(|item| {
+            if item["type"].as_str().unwrap_or_default() != "users" {
+                return None;
+            }
+            Some((
+                item["id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .parse::<u64>()
+                    .unwrap_or_default(),
+                (
+                    item["attributes"]["username"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                    item["attributes"]["displayName"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .to_string(),
+                ),
+            ))
+        })
+        .collect::<HashMap<u64, (String, String)>>()
 }

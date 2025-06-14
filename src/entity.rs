@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use chrono::{FixedOffset, Utc};
-use sqlx::{Executor, FromRow, QueryBuilder, Sqlite, SqlitePool, query, query_as};
+use sqlx::{Error, Executor, FromRow, QueryBuilder, Sqlite, SqlitePool, query, query_as};
 use std::fmt;
 use std::fmt::Display;
 
@@ -60,6 +60,18 @@ pub struct Discussion {
     pub created_at: chrono::DateTime<FixedOffset>,
 }
 impl Discussion {
+    // TODO sort: ***REMOVED*** <--
+    // pub async fn find_by_id(id: u64, pool: &SqlitePool) -> Option<Discussion> {
+    //     let Some(mut discussion)=query_as::<_,Discussion>(r"select * from discussions where id=?")
+    //         .bind(id as i64)
+    //         .fetch_optional(pool)
+    //         .await
+    //         .unwrap() else{
+    //         return None;
+    //     };
+    //     // TODO find posts
+    //     Some()
+    // }
     pub async fn save_with_posts(&self, pool: &SqlitePool) {
         let mut tx = pool.begin().await.unwrap();
         query(
@@ -131,6 +143,7 @@ pub struct Job {
 #[derive(Debug, Clone)]
 pub enum JobStatus {
     Failed,
+    Partial,
     Success,
     Impossible,
 }
@@ -139,6 +152,7 @@ impl TryFrom<String> for JobStatus {
     fn try_from(value: String) -> Result<Self, Self::Error> {
         match value.as_str() {
             "failed" => Ok(JobStatus::Failed),
+            "partial" => Ok(JobStatus::Partial),
             "success" => Ok(JobStatus::Success),
             "impossible" => Ok(JobStatus::Impossible),
             _ => Err(anyhow!("Unknown JobStatus: {}", value)),
@@ -149,6 +163,7 @@ impl Display for JobStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             JobStatus::Failed => write!(f, "failed"),
+            JobStatus::Partial => write!(f, "partial"),
             JobStatus::Success => write!(f, "success"),
             JobStatus::Impossible => write!(f, "impossible"),
         }

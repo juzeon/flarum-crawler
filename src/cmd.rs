@@ -32,11 +32,13 @@ impl Cmd {
     }
     #[instrument(skip_all)]
     pub async fn retry(&self) {
-        let failed_discussion_jobs =
+        let mut retry_discussion_jobs =
             Job::find_by_entity_status("discussion", JobStatus::Failed, &self.conn).await;
+        retry_discussion_jobs
+            .extend(Job::find_by_entity_status("discussion", JobStatus::Partial, &self.conn).await);
         let (crawler, sender) = Crawler::new(self.config.clone(), self.conn.clone()).await;
         let set = crawler.launch().await;
-        for job in failed_discussion_jobs {
+        for job in retry_discussion_jobs {
             sender.send(job.entity_id).await.unwrap();
         }
         drop(sender);
