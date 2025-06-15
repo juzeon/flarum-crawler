@@ -1,10 +1,11 @@
 use anyhow::anyhow;
 use chrono::{FixedOffset, Utc};
+use serde::{Deserialize, Serialize};
 use sqlx::{Error, Executor, FromRow, QueryBuilder, Sqlite, SqlitePool, query, query_as};
 use std::fmt;
 use std::fmt::Display;
 
-#[derive(Debug, Clone, Default, FromRow)]
+#[derive(Debug, Clone, Default, FromRow, Serialize)]
 pub struct Post {
     pub id: u64,
     pub user_id: u64,
@@ -52,7 +53,7 @@ impl Post {
     }
 }
 
-#[derive(Debug, Clone, Default, FromRow)]
+#[derive(Debug, Clone, Default, FromRow, Serialize)]
 pub struct Discussion {
     pub id: u64,
     pub user_id: u64,
@@ -66,7 +67,24 @@ pub struct Discussion {
     pub is_frontpage: bool,
     pub created_at: chrono::DateTime<FixedOffset>,
 }
+#[derive(Debug, Clone, Default, FromRow, Serialize)]
+pub struct DiscussionExtended {
+    #[sqlx(flatten)]
+    #[serde(flatten)]
+    pub discussion: Discussion,
+    pub last_posted_at: chrono::DateTime<FixedOffset>,
+}
 impl Discussion {
+    pub async fn find_by_id_extended(id: u64, pool: &SqlitePool) -> Option<DiscussionExtended> {
+        Self::find_by_id(id, pool).await.map(|mut x| {
+            x.posts.sort_by_key(|t| t.id);
+            let last_posted_at = x.posts.last().map(|t| t.created_at).unwrap_or_default();
+            DiscussionExtended {
+                discussion: x,
+                last_posted_at,
+            }
+        })
+    }
     pub async fn find_by_id(id: u64, pool: &SqlitePool) -> Option<Discussion> {
         let mut discussion = query_as::<_, Discussion>(r"select * from discussions where id=?")
             .bind(id as i64)
