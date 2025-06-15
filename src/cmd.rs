@@ -25,7 +25,14 @@ impl Cmd {
         for i in 1..=page {
             ids.extend(get_index_page(self.config.base_url.as_str(), i, None).await?)
         }
-        for id in ids {
+        let len = ids.len();
+        for (ix, id) in ids.into_iter().enumerate() {
+            info!(
+                current = ix + 1,
+                total = len,
+                id,
+                "Start to crawl discussion"
+            );
             sender.send(id).await?;
         }
         drop(sender);
