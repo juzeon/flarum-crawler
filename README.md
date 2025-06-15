@@ -21,7 +21,7 @@ cargo build -r
 ```yaml
 base_url: https://forum.example.com
 concurrency: 3
-db: data.db
+db: data.db # You need to create the database manually
 ```
 
 ## Database
