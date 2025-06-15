@@ -1,4 +1,4 @@
-use crate::entity::{Discussion, DiscussionExtended};
+use crate::entity::Discussion;
 use crate::server::{AppError, AppState};
 use actix_web::{HttpResponse, Responder, get, web};
 use anyhow::Context;
@@ -22,3 +22,5 @@ pub async fn get_discussion(
 pub async fn list_discussion() -> impl Responder {
     HttpResponse::Ok().finish()
 }
+
+pub async fn search() {}
