@@ -2,6 +2,7 @@ use crate::api::get_index_page;
 use crate::config::Config;
 use crate::crawler::Crawler;
 use crate::entity::{Job, JobStatus};
+use crate::server::{AppState, run_server};
 use sqlx::SqlitePool;
 use std::collections::HashSet;
 use std::time::Duration;
@@ -16,6 +17,13 @@ pub struct Cmd {
 impl Cmd {
     pub fn new(config: Config, conn: SqlitePool) -> Self {
         Self { config, conn }
+    }
+    pub async fn server(&self, addr: String, port: u16) {
+        let state = AppState {
+            conn: self.conn.clone(),
+            config: self.config.clone(),
+        };
+        run_server(addr, port, state).await
     }
     #[instrument(skip_all)]
     pub async fn cron(&self, page: usize) -> anyhow::Result<()> {

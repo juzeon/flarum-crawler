@@ -11,6 +11,7 @@ mod config;
 mod crawler;
 mod db;
 mod entity;
+mod server;
 
 #[derive(Parser)]
 struct Cli {
@@ -30,6 +31,12 @@ enum SubCmd {
         page_start: usize,
         #[arg(short, long)]
         ignore_existed: bool,
+    },
+    Server {
+        #[arg(short, long, default_value = "0.0.0.0")]
+        addr: String,
+        #[arg(short, long, default_value_t = 7075)]
+        port: u16,
     },
 }
 #[tokio::main]
@@ -57,5 +64,6 @@ async fn main() {
         SubCmd::Retry => {
             cmd.retry().await;
         }
+        SubCmd::Server { port, addr } => cmd.server(addr, port).await,
     }
 }
