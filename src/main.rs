@@ -2,6 +2,7 @@ use crate::cmd::Cmd;
 use crate::config::Config;
 use crate::db::get_connection_pool;
 use clap::{Parser, Subcommand};
+use tracing::error;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
@@ -54,7 +55,11 @@ async fn main() {
     let conn = get_connection_pool(config.db.as_str()).await.unwrap();
     let cmd = Cmd::new(config, conn);
     match cli.cmd {
-        SubCmd::Cron { page } => cmd.cron(page).await.unwrap(),
+        SubCmd::Cron { page } => {
+            if let Err(err) = cmd.cron(page).await {
+                error!("cmd.cron error: {:#}", err);
+            }
+        }
         SubCmd::Full {
             page_start,
             ignore_existed,

@@ -3,3 +3,4 @@
 config.yml
 data.db
 .git-bak
+.DS_Store
