@@ -26,6 +26,11 @@ enum SubCmd {
     Cron {
         page: usize,
     },
+    Export {
+        #[arg(short, long, default_value_t = 2)]
+        seg_digit: u32,
+    },
+    Embed,
     Retry,
     Full {
         #[arg(short, long, default_value_t = 1)]
@@ -70,5 +75,11 @@ async fn main() {
             cmd.retry().await;
         }
         SubCmd::Server { port, addr } => cmd.server(addr, port).await,
+        SubCmd::Embed => {
+            if let Err(err) = cmd.embed().await {
+                println!("error embedding: {err:#}");
+            }
+        }
+        SubCmd::Export { seg_digit } => cmd.export(seg_digit).await,
     }
 }

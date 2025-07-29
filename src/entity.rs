@@ -1,7 +1,9 @@
 use anyhow::anyhow;
 use chrono::{FixedOffset, Utc};
+use itertools::Itertools;
 use serde::{Deserialize, Serialize};
 use sqlx::{Error, Executor, FromRow, QueryBuilder, Sqlite, SqlitePool, query, query_as};
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Display;
 
@@ -74,7 +76,36 @@ pub struct DiscussionExtended {
     pub discussion: Discussion,
     pub last_posted_at: chrono::DateTime<FixedOffset>,
 }
+#[derive(Debug, Clone, Default)]
+pub struct DiscussionWithPosts {
+    pub discussion: Discussion,
+    pub posts: Vec<Post>,
+}
 impl Discussion {
+    pub async fn find_all_discussions_with_posts(pool: &SqlitePool) -> Vec<DiscussionWithPosts> {
+        let discussions = query_as::<_, Discussion>("select * from discussions")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+        let mut posts_map = query_as::<_, Post>("select * from posts")
+            .fetch_all(pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .into_group_map_by(|x| x.discussion_id);
+        let mut result = vec![];
+        for discussion in discussions.into_iter() {
+            let Some(posts) = posts_map.get_mut(&discussion.id) else {
+                continue;
+            };
+            posts.sort_by_key(|x| x.id);
+            result.push(DiscussionWithPosts {
+                discussion,
+                posts: posts.clone(),
+            });
+        }
+        result
+    }
     pub async fn find_by_id_extended(id: u64, pool: &SqlitePool) -> Option<DiscussionExtended> {
         Self::find_by_id(id, pool).await.map(|mut x| {
             x.posts.sort_by_key(|t| t.id);

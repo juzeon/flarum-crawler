@@ -94,8 +94,7 @@ pub async fn get_discussion(
     debug!(id, "Processing api/discussion");
     let response = client
         .get(format!(
-            "{}/api/discussions/{}?bySlug=true&page[near]=0",
-            base_url, id
+            "{base_url}/api/discussions/{id}?bySlug=true&page[near]=0",
         ))
         .send()
         .await?;

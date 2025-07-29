@@ -1,11 +1,12 @@
 use crate::api::get_index_page;
 use crate::config::Config;
 use crate::crawler::Crawler;
-use crate::entity::{Job, JobStatus};
+use crate::entity::{Discussion, Job, JobStatus};
 use crate::server::{AppState, run_server};
 use sqlx::SqlitePool;
 use std::collections::HashSet;
 use std::time::Duration;
+use tokio::fs::{create_dir_all, write};
 use tokio::time::sleep;
 use tracing::{error, info, instrument};
 
@@ -17,6 +18,65 @@ pub struct Cmd {
 impl Cmd {
     pub fn new(config: Config, conn: SqlitePool) -> Self {
         Self { config, conn }
+    }
+    pub async fn export(&self, seg_digit: u32) {
+        let discussions = Discussion::find_all_discussions_with_posts(&self.conn).await;
+        create_dir_all("export").await.unwrap();
+        let mut created_seg_dir: HashSet<u64> = HashSet::new();
+        for discussion in discussions.into_iter() {
+            let seg = discussion.discussion.id % 10u64.pow(seg_digit);
+            let path = format!("export/{seg}");
+            if !created_seg_dir.contains(&seg) {
+                create_dir_all(path.as_str()).await.unwrap();
+                created_seg_dir.insert(seg);
+            }
+            let topic_owner_user_id = discussion
+                .posts
+                .first()
+                .cloned()
+                .unwrap_or_default()
+                .user_id;
+            let arr = discussion
+                .posts
+                .into_iter()
+                .map(|item| {
+                    let reply_line = match item.reply_to_id {
+                        0 => "".to_string(),
+                        id => {
+                            format!("In response to post id: {id}\n")
+                        }
+                    };
+                    let topic_owner_label = if topic_owner_user_id == item.user_id {
+                        " [Topic Owner]"
+                    } else {
+                        ""
+                    }
+                    .to_string();
+                    format!(
+                        "## Post ID: {}\nUser: {} (id: {}){}\n{}Created At: {}\nContent: {}\n\n---",
+                        item.id,
+                        item.user_display_name,
+                        item.user_id,
+                        topic_owner_label,
+                        reply_line,
+                        item.created_at,
+                        item.content
+                    )
+                })
+                .collect::<Vec<String>>();
+            let result = format!(
+                "# {}\n\n===\n\n{}",
+                discussion.discussion.title,
+                arr.join("\n\n")
+            );
+            write(format!("{}/{}.md", path, discussion.discussion.id), result)
+                .await
+                .unwrap();
+        }
+    }
+    pub async fn embed(&self) -> anyhow::Result<()> {
+        todo!();
+        Ok(())
     }
     pub async fn server(&self, addr: String, port: u16) {
         let state = AppState {
