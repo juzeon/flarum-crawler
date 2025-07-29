@@ -65,8 +65,10 @@ impl Cmd {
                 })
                 .collect::<Vec<String>>();
             let result = format!(
-                "# {}\n\n===\n\n{}",
+                "# {}\n\n<{}/d/{}>\n\n===\n\n{}",
                 discussion.discussion.title,
+                self.config.base_url,
+                discussion.discussion.id,
                 arr.join("\n\n")
             );
             write(format!("{}/{}.md", path, discussion.discussion.id), result)
